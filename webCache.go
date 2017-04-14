@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,14 +14,19 @@ import (
 )
 
 type Mux struct {
-	cache    map[string][]byte
+	cache    map[string]serve
 	errCache map[string][]byte
 	errMatch *regexp.Regexp
 }
 
+type serve struct {
+	header string
+	data   []byte
+}
+
 func NewMux() *Mux {
 	mux := &Mux{
-		cache:    make(map[string][]byte),
+		cache:    make(map[string]serve),
 		errCache: make(map[string][]byte),
 	}
 	r, err := regexp.Compile("/error/[\\d]+$")
@@ -49,15 +55,16 @@ func (m *Mux) setCache() {
 		path = strings.Replace(path, "serve/", "", 1)
 
 		if info.Name() == "index.html" {
+
 			shortPath := strings.Replace(path, "index.html", "", -1)
 			if shortPath != "/" && strings.HasSuffix(shortPath, "/") {
 				shortPath = shortPath[:len(shortPath)-1]
 			}
 
-			m.cache["/"+shortPath] = b
+			m.cache["/"+shortPath] = serve{"text/html; utf-8", b}
 		}
 
-		m.cache["/"+path] = b
+		m.cache["/"+path] = serve{mime.TypeByExtension(filepath.Ext(path)), b}
 		return nil
 	}); err != nil {
 		panic(err)
@@ -102,10 +109,13 @@ func (m *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, ERROR, code, code, http.StatusText(code))
 		return
 	}
-	if file, ok := m.cache[r.URL.Path]; ok {
-		w.Write(file)
+	if toServe, ok := m.cache[r.URL.Path]; ok {
+		if toServe.header != "" {
+			w.Header().Set("Content-Type", toServe.header)
+		}
+		w.Write(toServe.data)
 		return
 	}
-	http.Redirect(w, r, "/error/404", 303)
+	http.Redirect(w, r, "/error/404", 404)
 	return
 }
