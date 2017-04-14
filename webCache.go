@@ -29,7 +29,7 @@ func NewMux() *Mux {
 	}
 	mux.errMatch = r
 	mux.setCache()
-
+	mux.setErrCache()
 	return mux
 }
 
@@ -64,13 +64,33 @@ func (m *Mux) setCache() {
 	}
 }
 
+func (m *Mux) setErrCache() {
+	if err := filepath.Walk("error", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		b, err := ioutil.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		m.errCache["/"+strings.Replace(path, ".html", "", -1)] = b
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+}
+
 var ERROR = `<html><head><title>Error %d</title></head><body style="text-align:center;"><h1>Error %d</h1><p>%s</o></body></html>`
 
 func (m *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if m.errMatch.MatchString(r.URL.Path) {
 		if err, ok := m.errCache[r.URL.Path]; ok {
 			w.Header().Set("Content-Type", "text/html; utf-8")
-			fmt.Fprint(w, err)
+			w.Write(err)
 			return
 		}
 		codestr := strings.Replace(r.URL.Path, "/error/", "", -1)
